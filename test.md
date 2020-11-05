@@ -1,5 +1,0 @@
-cool
-
-yes cook
-
-boo

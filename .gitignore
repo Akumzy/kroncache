@@ -15,3 +15,6 @@
 # vendor/
 go.sum
 t
+node_modules
+db
+yarn.lock

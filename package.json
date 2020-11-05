@@ -1,0 +1,12 @@
+{
+  "name": "kroncache",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "https://github.com/Akumzy/kroncache.git",
+  "author": "Akuma Isaac Akuma <akumaisaacakuma@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "ms": "^2.1.2",
+    "ws": "^7.3.1"
+  }
+}
