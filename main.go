@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -15,28 +16,37 @@ import (
 )
 
 type Store struct {
-	ID     string
-	Expire time.Time
-	Record string
+	ID      string
+	Expire  time.Time
+	Record  string
+	Expired bool
 }
 type Payload struct {
 	Key    string    `json:"key,omitempty"`
 	Expire time.Time `json:"expire,omitempty"`
 	Data   string    `json:"data,omitempty"`
 	Action string    `json:"action,omitempty"`
+	Error  string    `json:"error,omitempty"`
+	ID     string    `json:"id,omitempty"`
 }
 
 var addr = flag.String("addr", "localhost:8080", "http service address")
 
-var upgrader = websocket.Upgrader{} // use default options
-var DIR, _ = os.Getwd()
-var dbDir = filepath.Join(DIR, "db")
-var ActiveClient = 1
-var idLock = &sync.Mutex{}
-var store *badgerhold.Store
+var (
+	upgrader     = websocket.Upgrader{}
+	DIR, _       = os.Getwd()
+	dbDir        = filepath.Join(DIR, "db")
+	ActiveClient = 1
+	idLock       = &sync.Mutex{}
+	store        *badgerhold.Store
+	events       = make(chan Store)
+	eb           = &EventBus{
+		subscribers: Subscribers{},
+	}
+)
 
 const (
-	duration = 5 * time.Second
+	duration = 20 * time.Second
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -45,16 +55,86 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		log.Print("upgrade:", err)
 		return
 	}
-	defer c.Close()
-	for {
+	key := makeID()
+	defer func() {
+		c.Close()
+		eb.Unsbscribe(key)
+	}()
 
+	var ch = make(DataChannel)
+	go eb.Subscribe(key, ch)
+	go func(c *websocket.Conn, ch DataChannel) {
+		for {
+			select {
+			case event := <-ch:
+				websocket.WriteJSON(c, event)
+			}
+		}
+
+	}(c, ch)
+
+	for {
 		var p Payload
 		err := websocket.ReadJSON(c, &p)
 		if err != nil {
 			log.Println("write:", err)
 			break
 		}
-		fmt.Println(p)
+		switch p.Action {
+		case "SET":
+			{
+
+				err = saveRecord(p)
+				var data *Payload
+				if err != nil {
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "RESPONSE", ID: p.ID}
+				} else {
+					data = &Payload{Key: p.Key, Action: "RESPONSE", ID: p.ID}
+				}
+
+				err = websocket.WriteJSON(c, &data)
+				log.Fatalln(err)
+			}
+		case "GET":
+			{
+				var result Payload
+				result, err = getRecord(p.Key)
+				var data *Payload
+				if err != nil {
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "GET", ID: p.ID, Expire: p.Expire}
+				} else {
+					data = &Payload{Key: p.Key, Action: "GET", Data: result.Data, ID: p.ID, Expire: p.Expire}
+				}
+				websocket.WriteJSON(c, &data)
+			}
+		case "PURGE":
+			{
+
+				err = purgeRecords()
+				var data *Payload
+				if err != nil {
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "PURGE", ID: p.ID}
+				} else {
+					data = &Payload{Key: p.Key, Action: "PURGE", ID: p.ID}
+				}
+				websocket.WriteJSON(c, &data)
+			}
+		case "DUMP":
+			{
+				var result []Payload
+				result, err = getAllRecord()
+
+				var data *Payload
+				if err != nil {
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "DUMP", ID: p.ID}
+				} else {
+					d, _ := json.Marshal(result)
+					data = &Payload{Key: p.Key, Action: "DUMP", Data: string(d), ID: p.ID}
+				}
+				websocket.WriteJSON(c, &data)
+			}
+		}
+
 	}
 }
 func makeID() int {
@@ -74,10 +154,10 @@ func main() {
 	store, err = badgerhold.Open(options)
 	defer store.Close()
 	if err != nil {
-		// handle error
 		log.Fatal(err)
 	}
-	go runner(store)
+	go runner(store, eb)
+
 	http.HandleFunc("/", handler)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Fatal(err)
@@ -85,10 +165,11 @@ func main() {
 
 }
 func saveRecord(p Payload) error {
-	err := store.Insert(p.Key, p)
+	record := Store{ID: p.Key, Expire: p.Expire, Record: p.Data}
+	err := store.Insert(p.Key, record)
 	if err != nil {
 		if err == badgerhold.ErrKeyExists {
-			err = store.Update(p.Key, p)
+			err = store.Update(p.Key, record)
 		}
 	}
 	return err
@@ -98,21 +179,44 @@ func getRecord(key string) (Payload, error) {
 	err := store.Get(key, &result)
 	return result, err
 }
+func getAllRecord() ([]Payload, error) {
+	var result []Payload
+	err := store.Find(&result, nil)
+	return result, err
+}
+func purgeRecords() error {
+	err := store.DeleteMatching(&Store{}, nil)
+	return err
+}
 
-func runner(store *badgerhold.Store) {
+func runner(store *badgerhold.Store, eb *EventBus) {
 	timer := time.NewTicker(duration)
 	defer timer.Stop()
 	for {
 		select {
 		case <-timer.C:
 			{
-				fmt.Println(time.Now().Date())
 				var data []Store
-				err := store.Find(&data, badgerhold.Where("Expire").Le(time.Now()))
+				now := time.Now()
+				err := store.Find(&data, badgerhold.Where("Expired").Ne(true).And("Expire").Le(now))
 				if err != nil {
 					log.Fatalln("Find error:", err)
 				}
-				fmt.Println(data)
+				err = store.UpdateMatching(&Store{}, badgerhold.Where("Expired").Ne(true).And("Expire").Le(now), func(record interface{}) error {
+					update, ok := record.(*Store)
+					if !ok {
+						return fmt.Errorf("Record isn't the correct type!  Wanted Store, got %T", record)
+					}
+					update.Expired = true
+					return nil
+				})
+				if err != nil {
+					log.Fatalln("Find error:", err)
+				}
+				for _, event := range data {
+					eb.Publish(Payload{Key: event.ID, Data: event.Record, Expire: event.Expire, Action: "EXPIRED"})
+				}
+
 			}
 		}
 	}
