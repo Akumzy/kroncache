@@ -1,12 +1,19 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/timshannon/badgerhold"
 )
 
+func TestMain(m *testing.M) {
+	go func() {
+		os.Exit(m.Run())
+	}()
+}
 func Test_makeID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -35,7 +42,8 @@ func Test_saveRecord(t *testing.T) {
 		args    args
 		wantErr bool
 	}{
-		{name: "Save a record", args: args{p: Payload{}}, wantErr: true},
+		{name: "Save a record without key", args: args{p: Payload{}}, wantErr: true},
+		{name: "Save a record with key", args: args{p: Payload{Key: "Boo"}}, wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -47,6 +55,7 @@ func Test_saveRecord(t *testing.T) {
 }
 
 func Test_getRecord(t *testing.T) {
+	saveRecord(Payload{Key: "COOL", Expire: time.Now(), Data: "LOKI"})
 	type args struct {
 		key string
 	}
@@ -56,7 +65,7 @@ func Test_getRecord(t *testing.T) {
 		want    Payload
 		wantErr bool
 	}{
-		// TODO: Add test cases.
+		{name: "getRecord", args: args{key: "COOL"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

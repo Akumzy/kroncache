@@ -16,10 +16,10 @@ import (
 )
 
 type Store struct {
-	ID      string
-	Expire  time.Time
-	Record  string
-	Expired bool
+	ID      string    `json:"id,omitempty"`
+	Expire  time.Time `json:"expire,omitempty"`
+	Record  string    `json:"record,omitempty"`
+	Expired bool      `json:"expired,omitempty"`
 }
 type Payload struct {
 	Key    string    `json:"key,omitempty"`
@@ -29,8 +29,6 @@ type Payload struct {
 	Error  string    `json:"error,omitempty"`
 	ID     string    `json:"id,omitempty"`
 }
-
-var addr = flag.String("addr", "localhost:8080", "http service address")
 
 var (
 	upgrader     = websocket.Upgrader{}
@@ -48,6 +46,31 @@ var (
 const (
 	duration = 20 * time.Second
 )
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5093"
+	}
+	log.Println(port)
+	var addr = flag.String("addr", "localhost:"+port, "http service address")
+	options := badgerhold.DefaultOptions
+	options.Dir = dbDir
+	options.ValueDir = dbDir
+	var err error
+	store, err = badgerhold.Open(options)
+	defer store.Close()
+	if err != nil {
+		log.Fatal(err)
+	}
+	go runner(store, eb)
+
+	http.HandleFunc("/", handler)
+	if err := http.ListenAndServe(*addr, nil); err != nil {
+		log.Fatal(err)
+	}
+
+}
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
@@ -107,6 +130,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 				websocket.WriteJSON(c, &data)
 			}
+		case "DELETE":
+			{
+
+				err = deleteRecord(p.Key)
+				var data *Payload
+				if err != nil {
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "DELETE", ID: p.ID}
+				} else {
+					data = &Payload{Key: p.Key, Action: "DELETE", ID: p.ID}
+				}
+				websocket.WriteJSON(c, &data)
+			}
 		case "PURGE":
 			{
 
@@ -121,15 +156,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 		case "DUMP":
 			{
-				var result []Payload
+				var result []Store
 				result, err = getAllRecord()
 
 				var data *Payload
 				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "DUMP", ID: p.ID}
+					data = &Payload{Error: err.Error(), Action: "DUMP", ID: p.ID}
 				} else {
 					d, _ := json.Marshal(result)
-					data = &Payload{Key: p.Key, Action: "DUMP", Data: string(d), ID: p.ID}
+					data = &Payload{Action: "DUMP", Data: string(d), ID: p.ID}
 				}
 				websocket.WriteJSON(c, &data)
 			}
@@ -145,25 +180,6 @@ func makeID() int {
 	return id
 }
 
-func main() {
-
-	options := badgerhold.DefaultOptions
-	options.Dir = dbDir
-	options.ValueDir = dbDir
-	var err error
-	store, err = badgerhold.Open(options)
-	defer store.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-	go runner(store, eb)
-
-	http.HandleFunc("/", handler)
-	if err := http.ListenAndServe(*addr, nil); err != nil {
-		log.Fatal(err)
-	}
-
-}
 func saveRecord(p Payload) error {
 	record := Store{ID: p.Key, Expire: p.Expire, Record: p.Data}
 	err := store.Insert(p.Key, record)
@@ -179,14 +195,17 @@ func getRecord(key string) (Payload, error) {
 	err := store.Get(key, &result)
 	return result, err
 }
-func getAllRecord() ([]Payload, error) {
-	var result []Payload
+func getAllRecord() ([]Store, error) {
+	var result []Store
 	err := store.Find(&result, nil)
 	return result, err
 }
 func purgeRecords() error {
-	err := store.DeleteMatching(&Store{}, nil)
-	return err
+	return store.DeleteMatching(&Store{}, nil)
+}
+
+func deleteRecord(key string) error {
+	return store.Delete(key, &Store{})
 }
 
 func runner(store *badgerhold.Store, eb *EventBus) {

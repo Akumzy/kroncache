@@ -4,12 +4,11 @@ import (
 	"sync"
 )
 
-// DataChannel is a channel which can accept an DataEvent
 type DataChannel chan Payload
 
 type Subscribers map[int]DataChannel
 
-// EventBus stores the information about subscribers interested for a particular topic
+// EventBus stores the information about subscribers
 type EventBus struct {
 	subscribers Subscribers
 	rm          sync.RWMutex
