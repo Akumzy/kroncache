@@ -1,19 +1,12 @@
 package main
 
 import (
-	"os"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/timshannon/badgerhold"
 )
 
-func TestMain(m *testing.M) {
-	go func() {
-		os.Exit(m.Run())
-	}()
-}
 func Test_makeID(t *testing.T) {
 	tests := []struct {
 		name string
@@ -54,55 +47,6 @@ func Test_saveRecord(t *testing.T) {
 	}
 }
 
-func Test_getRecord(t *testing.T) {
-	saveRecord(Payload{Key: "COOL", Expire: time.Now(), Data: "LOKI"})
-	type args struct {
-		key string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    Payload
-		wantErr bool
-	}{
-		{name: "getRecord", args: args{key: "COOL"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := getRecord(tt.args.key)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getRecord() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("getRecord() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_getAllRecord(t *testing.T) {
-	tests := []struct {
-		name    string
-		want    []Payload
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := getAllRecord()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("getAllRecord() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("getAllRecord() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func Test_purgeRecords(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -133,6 +77,34 @@ func Test_runner(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			runner(tt.args.store, tt.args.eb)
+		})
+	}
+}
+
+func Test_getRecord(t *testing.T) {
+	data := Payload{Key: "COOL", Expire: time.Now(), Data: "LOKI"}
+	saveRecord(data)
+	type args struct {
+		key string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    Store
+		wantErr bool
+	}{
+		{name: "getRecord", args: args{key: "COOL"}, want: Store{Record: data.Data, ID: data.Key, Expire: data.Expire}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getRecord(tt.args.key)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getRecord() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got.ID != tt.want.ID {
+				t.Errorf("getRecord() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

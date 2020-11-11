@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -16,8 +17,8 @@ import (
 )
 
 type Store struct {
-	ID      string    `json:"id,omitempty"`
-	Expire  time.Time `json:"expire,omitempty"`
+	ID      string    `badgerhold:"index" json:"id,omitempty"`
+	Expire  time.Time `badgerhold:"index" json:"expire,omitempty"`
 	Record  string    `json:"record,omitempty"`
 	Expired bool      `json:"expired,omitempty"`
 }
@@ -47,22 +48,28 @@ const (
 	duration = 20 * time.Second
 )
 
-func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "5093"
-	}
-	log.Println(port)
-	var addr = flag.String("addr", "localhost:"+port, "http service address")
+func init() {
+	startDB()
+}
+func startDB() {
+
 	options := badgerhold.DefaultOptions
 	options.Dir = dbDir
 	options.ValueDir = dbDir
 	var err error
 	store, err = badgerhold.Open(options)
-	defer store.Close()
+
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5093"
+	}
+	var addr = flag.String("addr", "localhost:"+port, "http service address")
+
 	go runner(store, eb)
 
 	http.HandleFunc("/", handler)
@@ -120,13 +127,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 		case "GET":
 			{
-				var result Payload
+				var result Store
 				result, err = getRecord(p.Key)
 				var data *Payload
 				if err != nil {
 					data = &Payload{Key: p.Key, Error: err.Error(), Action: "GET", ID: p.ID, Expire: p.Expire}
 				} else {
-					data = &Payload{Key: p.Key, Action: "GET", Data: result.Data, ID: p.ID, Expire: p.Expire}
+					data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, Expire: p.Expire}
 				}
 				websocket.WriteJSON(c, &data)
 			}
@@ -181,6 +188,9 @@ func makeID() int {
 }
 
 func saveRecord(p Payload) error {
+	if p.Key == "" {
+		return errors.New("Record key can not be empty.")
+	}
 	record := Store{ID: p.Key, Expire: p.Expire, Record: p.Data}
 	err := store.Insert(p.Key, record)
 	if err != nil {
@@ -190,8 +200,12 @@ func saveRecord(p Payload) error {
 	}
 	return err
 }
-func getRecord(key string) (Payload, error) {
-	var result Payload
+func getRecord(key string) (Store, error) {
+	var result Store
+	if key == "" {
+		return result, errors.New("key can not be empty.")
+	}
+
 	err := store.Get(key, &result)
 	return result, err
 }
