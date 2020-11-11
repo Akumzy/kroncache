@@ -47,22 +47,6 @@ func Test_saveRecord(t *testing.T) {
 	}
 }
 
-func Test_purgeRecords(t *testing.T) {
-	tests := []struct {
-		name    string
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := purgeRecords(); (err != nil) != tt.wantErr {
-				t.Errorf("purgeRecords() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func Test_runner(t *testing.T) {
 	type args struct {
 		store *badgerhold.Store
@@ -82,7 +66,7 @@ func Test_runner(t *testing.T) {
 }
 
 func Test_getRecord(t *testing.T) {
-	data := Payload{Key: "COOL", Expire: time.Now(), Data: "LOKI"}
+	data := Payload{Key: "COOL", TTL: time.Now(), Data: "LOKI"}
 	saveRecord(data)
 	type args struct {
 		key string
@@ -93,7 +77,7 @@ func Test_getRecord(t *testing.T) {
 		want    Store
 		wantErr bool
 	}{
-		{name: "getRecord", args: args{key: "COOL"}, want: Store{Record: data.Data, ID: data.Key, Expire: data.Expire}},
+		{name: "getRecord", args: args{key: "COOL"}, want: Store{Record: data.Data, ID: data.Key, TTL: data.TTL}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,17 +17,19 @@ import (
 
 type Store struct {
 	ID      string    `badgerhold:"index" json:"id,omitempty"`
-	Expire  time.Time `badgerhold:"index" json:"expire,omitempty"`
+	TTL     time.Time `badgerhold:"index" json:"ttl,omitempty"`
 	Record  string    `json:"record,omitempty"`
 	Expired bool      `json:"expired,omitempty"`
+	ACK     bool      `json:"ack,omitempty"`
 }
 type Payload struct {
 	Key    string    `json:"key,omitempty"`
-	Expire time.Time `json:"expire,omitempty"`
+	TTL    time.Time `json:"ttl,omitempty"`
 	Data   string    `json:"data,omitempty"`
 	Action string    `json:"action,omitempty"`
 	Error  string    `json:"error,omitempty"`
 	ID     string    `json:"id,omitempty"`
+	ACK    bool      `json:"ack,omitempty"`
 }
 
 var (
@@ -45,14 +46,13 @@ var (
 )
 
 const (
-	duration = 20 * time.Second
+	duration = 1 * time.Second
 )
 
 func init() {
 	startDB()
 }
 func startDB() {
-
 	options := badgerhold.DefaultOptions
 	options.Dir = dbDir
 	options.ValueDir = dbDir
@@ -113,7 +113,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		switch p.Action {
 		case "SET":
 			{
-
 				err = saveRecord(p)
 				var data *Payload
 				if err != nil {
@@ -121,9 +120,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					data = &Payload{Key: p.Key, Action: "RESPONSE", ID: p.ID}
 				}
+				websocket.WriteJSON(c, &data)
 
-				err = websocket.WriteJSON(c, &data)
-				log.Fatalln(err)
 			}
 		case "GET":
 			{
@@ -131,9 +129,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				result, err = getRecord(p.Key)
 				var data *Payload
 				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "GET", ID: p.ID, Expire: p.Expire}
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "GET", ID: p.ID, TTL: p.TTL}
 				} else {
-					data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, Expire: p.Expire}
+					data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, TTL: p.TTL}
 				}
 				websocket.WriteJSON(c, &data)
 			}
@@ -149,29 +147,29 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 				websocket.WriteJSON(c, &data)
 			}
-		case "PURGE":
+		case "RESET":
 			{
 
-				err = purgeRecords()
+				err = reset()
 				var data *Payload
 				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "PURGE", ID: p.ID}
+					data = &Payload{Key: p.Key, Error: err.Error(), Action: "RESET", ID: p.ID}
 				} else {
-					data = &Payload{Key: p.Key, Action: "PURGE", ID: p.ID}
+					data = &Payload{Key: p.Key, Action: "RESET", ID: p.ID}
 				}
 				websocket.WriteJSON(c, &data)
 			}
-		case "DUMP":
+		case "KEYS":
 			{
-				var result []Store
-				result, err = getAllRecord()
-
+				var results []string
+				results, err = getKeys()
 				var data *Payload
 				if err != nil {
-					data = &Payload{Error: err.Error(), Action: "DUMP", ID: p.ID}
+					data = &Payload{Error: err.Error(), Action: "KEYS", ID: p.ID}
 				} else {
-					d, _ := json.Marshal(result)
-					data = &Payload{Action: "DUMP", Data: string(d), ID: p.ID}
+					var b []byte
+					b, err = json.Marshal(&results)
+					data = &Payload{Action: "KEYS", Data: string(b), ID: p.ID}
 				}
 				websocket.WriteJSON(c, &data)
 			}
@@ -191,7 +189,8 @@ func saveRecord(p Payload) error {
 	if p.Key == "" {
 		return errors.New("Record key can not be empty.")
 	}
-	record := Store{ID: p.Key, Expire: p.Expire, Record: p.Data}
+
+	record := Store{ID: p.Key, TTL: p.TTL, Record: p.Data}
 	err := store.Insert(p.Key, record)
 	if err != nil {
 		if err == badgerhold.ErrKeyExists {
@@ -209,12 +208,21 @@ func getRecord(key string) (Store, error) {
 	err := store.Get(key, &result)
 	return result, err
 }
-func getAllRecord() ([]Store, error) {
+func getKeys() ([]string, error) {
 	var result []Store
 	err := store.Find(&result, nil)
-	return result, err
+	var keys []string
+	if err == nil {
+		keys := make([]string, len(result))
+		for _, r := range result {
+			keys = append(keys, r.ID)
+		}
+		result = nil
+		return keys, nil
+	}
+	return keys, err
 }
-func purgeRecords() error {
+func reset() error {
 	return store.DeleteMatching(&Store{}, nil)
 }
 
@@ -231,23 +239,19 @@ func runner(store *badgerhold.Store, eb *EventBus) {
 			{
 				var data []Store
 				now := time.Now()
-				err := store.Find(&data, badgerhold.Where("Expired").Ne(true).And("Expire").Le(now))
+				err := store.Find(&data, badgerhold.Where("Expired").Ne(true).And("TTL").Le(now))
 				if err != nil {
 					log.Fatalln("Find error:", err)
 				}
-				err = store.UpdateMatching(&Store{}, badgerhold.Where("Expired").Ne(true).And("Expire").Le(now), func(record interface{}) error {
-					update, ok := record.(*Store)
-					if !ok {
-						return fmt.Errorf("Record isn't the correct type!  Wanted Store, got %T", record)
+
+				for _, r := range data {
+					if r.ACK {
+						store.Update(r.ID, &Store{ID: r.ID, Record: r.Record, ACK: r.ACK, TTL: r.TTL, Expired: true})
+						eb.Publish(Payload{Key: r.ID, Data: r.Record, TTL: r.TTL, Action: "EXPIRED"})
+					} else {
+						store.Delete(r.ID, &Store{})
 					}
-					update.Expired = true
-					return nil
-				})
-				if err != nil {
-					log.Fatalln("Find error:", err)
-				}
-				for _, event := range data {
-					eb.Publish(Payload{Key: event.ID, Data: event.Record, Expire: event.Expire, Action: "EXPIRED"})
+
 				}
 
 			}
