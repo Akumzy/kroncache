@@ -129,7 +129,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				result, err = getRecord(p.Key)
 				var data *Payload
 				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "GET", ID: p.ID, TTL: p.TTL}
+					data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
 				} else {
 					data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, TTL: p.TTL}
 				}
