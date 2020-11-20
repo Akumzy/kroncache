@@ -190,7 +190,7 @@ func saveRecord(p Payload) error {
 		return errors.New("Record key can not be empty.")
 	}
 
-	record := Store{ID: p.Key, TTL: p.TTL, Record: p.Data}
+	record := Store{ID: p.Key, TTL: p.TTL, Record: p.Data, ACK: p.ACK}
 	err := store.Insert(p.Key, record)
 	if err != nil {
 		if err == badgerhold.ErrKeyExists {
