@@ -9,15 +9,16 @@ example for Linux amd64 `kroncache_x.x.x_linux_amd64.tar.gz`
 then unzip into your desired directory
 
 ```sh
-$  mkdir -p kroncache && cd kroncache && tar -xf ../kroncache_x.x.x_linux_amd64.tar.gz
+$ tar -xf kroncache_x.x.x_Linux_64-bit.tar.gz
 ```
 Then run `kroncache` with the default port `5093`
 ```sh
-./kroncache
+$ cd kroncache_x.x.x_Linux_64-bit
+$ ./kroncache
 ```
 or change the port by setting the PORT environment variable
 ```sh
-PORT=5599 ./kroncache
+$ PORT=5599 ./kroncache
 ```
 
 # Clients 
