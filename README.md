@@ -9,7 +9,7 @@ example for Linux amd64 `kroncache_x.x.x_linux_amd64.tar.gz`
 then unzip into your desired directory
 
 ```sh
-$   tar -xf kroncache_x.x.x_Linux_64-bit.tar.gz
+$ tar -xf kroncache_x.x.x_Linux_64-bit.tar.gz
 ```
 Then run `kroncache` with the default port `5093`
 ```sh
