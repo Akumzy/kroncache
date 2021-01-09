@@ -14,7 +14,7 @@ jobs:
         id: docker_meta
         uses: crazy-max/ghaction-docker-meta@v1
         with:
-          images: name/app # list of Docker images to use as base name for tags
+          images: akumzy/kroncache # list of Docker images to use as base name for tags
           tag-sha: true # add git short SHA as Docker tag
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
