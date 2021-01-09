@@ -28,5 +28,5 @@ jobs:
         with:
           push: true
           tags: |
-            ghcr.io/Akumzy/kroncache:${{ github.event.release.tag_name }}
-            ghcr.io/Akumzy/kroncache:latest
+            ghcr.io/akumzy/kroncache:${{ github.event.release.tag_name }}
+            ghcr.io/akumzy/kroncache:latest
