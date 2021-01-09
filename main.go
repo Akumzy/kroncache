@@ -74,7 +74,7 @@ func main() {
 	if port == "" {
 		port = "5093"
 	}
-	var addr = flag.String("addr", "localhost:"+port, "http service address")
+	var addr = flag.String("addr", "0.0.0.0:"+port, "http service address")
 
 	go runner(store, eb)
 
