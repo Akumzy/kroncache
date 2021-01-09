@@ -6,15 +6,13 @@ jobs:
   main:
     runs-on: ubuntu-latest
     steps:
-     
       - name: Checkout
         uses: actions/checkout@v2
-      -
-        name: Docker meta
+      - name: Docker meta
         id: docker_meta
         uses: crazy-max/ghaction-docker-meta@v1
         with:
-          images: akumzy/kroncache # list of Docker images to use as base name for tags
+          images: Akumzy/kroncache # list of Docker images to use as base name for tags
           tag-sha: true # add git short SHA as Docker tag
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -28,7 +26,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.CR_PAT }}
-          
+
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v2
