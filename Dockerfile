@@ -21,8 +21,9 @@ RUN go build .
 
 # Start fresh from a smaller image
 FROM alpine:latest
-RUN apk add ca-certificates
 
+RUN apk add ca-certificates
+WORKDIR /app
 COPY --from=build_base /tmp/app/kroncache /app/kroncache
 
 # This container exposes port 5093 to the outside world
