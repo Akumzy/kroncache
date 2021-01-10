@@ -3,7 +3,7 @@ FROM golang:1.15-alpine AS build_base
 RUN apk add --no-cache git
 
 # Set the Current Working Directory inside the container
-WORKDIR /tmp/app
+WORKDIR /tmp/kroncache
 
 # We want to populate the module cache based on the go.{mod,sum} files.
 COPY go.mod .
@@ -24,8 +24,9 @@ FROM alpine:latest
 
 RUN apk add ca-certificates
 WORKDIR /app
-COPY --from=build_base /tmp/app/kroncache /app/kroncache
+COPY --from=build_base /tmp/kroncache/kroncache /app/kroncache
 
+RUN ls
 # This container exposes port 5093 to the outside world
 EXPOSE 5093
 
