@@ -29,7 +29,5 @@ COPY --from=build_base /tmp/app/kroncache /app/kroncache
 # This container exposes port 5093 to the outside world
 EXPOSE 5093
 
-RUN chmod +x /app/kroncache
-
 # Run the binary program produced by `go install`
-CMD ["/app/kroncache"]
+ENTRYPOINT  ["/app/kroncache"]
