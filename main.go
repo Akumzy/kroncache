@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type Payload struct {
 	ID     string    `json:"id,omitempty"`
 	ACK    bool      `json:"ack,omitempty"`
 	Cron   string    `json:"cron,omitempty"`
+	RegExp string    `json:"regex,omitempty"`
 }
 
 var (
@@ -132,14 +134,28 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 		case "GET":
 			{
-				var result Store
-				result, err = getRecord(p.Key)
+
 				var data *Payload
-				if err != nil {
-					data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
+				if p.RegExp != "" {
+					var results []string
+					results, err = getRecords(p.RegExp)
+					var b []byte
+					b, err = json.Marshal(&results)
+					if err != nil {
+						data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
+					} else {
+						data = &Payload{Key: p.Key, Action: "GET", Data: string(b), ID: p.ID, TTL: p.TTL}
+					}
 				} else {
-					data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, TTL: p.TTL}
+					var result Store
+					if err != nil {
+						data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
+					} else {
+						data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, TTL: p.TTL}
+					}
+					result, err = getRecord(p.Key)
 				}
+
 				websocket.WriteJSON(c, &data)
 			}
 		case "DELETE":
@@ -213,8 +229,25 @@ func saveRecord(p Payload) error {
 	}
 	return err
 }
+func getRecords(regex string) ([]string, error) {
+	var result []Store
+
+	reg := regexp.MustCompile(regex)
+	err := store.Find(&result, badgerhold.Where("ID").RegExp(reg))
+	var results []string
+	if err == nil {
+		results := make([]string, len(results))
+		for _, r := range result {
+			results = append(results, r.Record)
+		}
+		return results, nil
+	}
+	return results, err
+
+}
 func getRecord(key string) (Store, error) {
 	var result Store
+
 	if key == "" {
 		return result, errors.New("key can not be empty.")
 	}
