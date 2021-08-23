@@ -27,6 +27,13 @@ type Store struct {
 	Cron    string    `json:"cron,omitempty"`
 	Action  string    `json:"action,omitempty"`
 }
+type BatchStore struct {
+	ID         uint64 `badgerhold:"index" json:"id,omitempty"`
+	Record     string `json:"record,omitempty"`
+	BatchID    string `json:"batchId,omitempty"`
+	BatchGroup time.Time
+	Flagged    bool
+}
 type Payload struct {
 	Key    string    `json:"key,omitempty"`
 	TTL    time.Time `json:"ttl,omitempty"`
@@ -38,6 +45,11 @@ type Payload struct {
 	Cron   string    `json:"cron,omitempty"`
 	RegExp string    `json:"regex,omitempty"`
 }
+type BatchRecord struct {
+	BatchID    string    `json:"batchId,omitempty"`
+	BatchGroup time.Time `json:"batchGroup"`
+	records    []string
+}
 
 var (
 	upgrader     = websocket.Upgrader{}
@@ -45,6 +57,7 @@ var (
 	dbDir        = filepath.Join(DIR, "db")
 	ActiveClient = 1
 	idLock       = &sync.Mutex{}
+	batchLock    = &sync.Mutex{}
 	store        *badgerhold.Store
 	events       = make(chan Store)
 	eb           = &EventBus{
@@ -120,82 +133,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		switch p.Action {
-		case "SET", "SCHEDULE":
-			{
-				err = saveRecord(p)
-				var data *Payload
-				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "RESPONSE", ID: p.ID}
-				} else {
-					data = &Payload{Key: p.Key, Action: "RESPONSE", ID: p.ID}
-				}
-				websocket.WriteJSON(c, &data)
-
-			}
+		case "SET", "SCHEDULE", "BATCH":
+			SetAndScheduleHandler(c, p)
 		case "GET":
-			{
-
-				var data *Payload
-				if p.RegExp != "" {
-					var results []string
-					results, err = getRecords(p.RegExp)
-					var b []byte
-					b, err = json.Marshal(&results)
-					if err != nil {
-						data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
-					} else {
-						data = &Payload{Key: p.Key, Action: "GET", Data: string(b), ID: p.ID, TTL: p.TTL}
-					}
-				} else {
-					var result Store
-					if err != nil {
-						data = &Payload{Error: err.Error(), Action: "GET", ID: p.ID}
-					} else {
-						data = &Payload{Key: p.Key, Action: "GET", Data: result.Record, ID: p.ID, TTL: p.TTL}
-					}
-					result, err = getRecord(p.Key)
-				}
-
-				websocket.WriteJSON(c, &data)
-			}
+			GetHandler(c, p)
 		case "DELETE":
-			{
-
-				err = deleteRecord(p.Key)
-				var data *Payload
-				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "DELETE", ID: p.ID}
-				} else {
-					data = &Payload{Key: p.Key, Action: "DELETE", ID: p.ID}
-				}
-				websocket.WriteJSON(c, &data)
-			}
+			DeleteHandler(c, p)
 		case "RESET":
-			{
-
-				err = reset()
-				var data *Payload
-				if err != nil {
-					data = &Payload{Key: p.Key, Error: err.Error(), Action: "RESET", ID: p.ID}
-				} else {
-					data = &Payload{Key: p.Key, Action: "RESET", ID: p.ID}
-				}
-				websocket.WriteJSON(c, &data)
-			}
+			ResetHandler(c, p)
+		case "ADD-BATCH":
+			AddToBatch(c, p)
 		case "KEYS":
-			{
-				var results []string
-				results, err = getKeys()
-				var data *Payload
-				if err != nil {
-					data = &Payload{Error: err.Error(), Action: "KEYS", ID: p.ID}
-				} else {
-					var b []byte
-					b, err = json.Marshal(&results)
-					data = &Payload{Action: "KEYS", Data: string(b), ID: p.ID}
-				}
-				websocket.WriteJSON(c, &data)
-			}
+			FetchKeysHandler(c, p)
 		}
 
 	}
@@ -212,6 +161,7 @@ func saveRecord(p Payload) error {
 	if p.Key == "" {
 		return errors.New("Record key can not be empty.")
 	}
+	fmt.Println(p)
 	record := Store{ID: p.Key, TTL: p.TTL, Record: p.Data, ACK: p.ACK, Cron: p.Cron, Action: p.Action}
 
 	if p.Cron != "" {
@@ -229,6 +179,16 @@ func saveRecord(p Payload) error {
 	}
 	return err
 }
+func addToBatch(p Payload) error {
+	batchLock.Lock()
+	defer batchLock.Unlock()
+	if p.Key == "" {
+		return errors.New("Record key can not be empty.")
+	}
+	record := BatchStore{BatchID: p.Key, Record: p.Data}
+
+	return store.Insert(badgerhold.NextSequence(), record)
+}
 func getRecords(regex string) ([]string, error) {
 	var result []Store
 
@@ -245,6 +205,7 @@ func getRecords(regex string) ([]string, error) {
 	return results, err
 
 }
+
 func getRecord(key string) (Store, error) {
 	var result Store
 
@@ -269,6 +230,7 @@ func getKeys() ([]string, error) {
 	}
 	return keys, err
 }
+
 func reset() error {
 	return store.DeleteMatching(&Store{}, nil)
 }
@@ -298,10 +260,26 @@ func runner(store *badgerhold.Store, eb *EventBus) {
 							store.Delete(r.ID, &Store{})
 						} else {
 							nextTime := sch.Next(time.Now())
-							store.Update(r.ID, &Store{ID: r.ID, Record: r.Record, TTL: nextTime, Cron: r.Cron})
+							store.Update(r.ID, &Store{ID: r.ID, Record: r.Record, TTL: nextTime, Cron: r.Cron, Action: r.Action})
+						}
+						if r.Action == "BATCH" {
+							var records []BatchStore
+							err := updateBatchStore(now, r.ID)
+							fmt.Println(err)
+							store.Find(&records, badgerhold.Where("BatchID").Eq(r.ID).And("BatchGroup").Eq(now))
+
+							values := make([]string, len(records))
+							fmt.Println(values)
+							for _, r := range records {
+								values = append(values, r.Record)
+							}
+							byts, _ := json.Marshal(values)
+
+							eb.Publish(Payload{Key: r.ID, Data: string(byts), TTL: r.TTL, Action: "BATCH"})
+						} else {
+							eb.Publish(Payload{Key: r.ID, Data: r.Record, TTL: r.TTL, Action: "CRON"})
 						}
 
-						eb.Publish(Payload{Key: r.ID, Data: r.Record, TTL: r.TTL, Action: "CRON"})
 					} else if r.ACK {
 						store.Update(r.ID, &Store{ID: r.ID, Record: r.Record, ACK: r.ACK, TTL: r.TTL, Expired: true})
 						action := "EXPIRED"
@@ -319,4 +297,19 @@ func runner(store *badgerhold.Store, eb *EventBus) {
 			}
 		}
 	}
+}
+
+func updateBatchStore(now time.Time, ID string) error {
+	batchLock.Lock()
+	defer batchLock.Unlock()
+	return store.UpdateMatching(&BatchStore{}, badgerhold.Where("BatchID").Eq(ID).And("Flagged").Ne(true), func(record interface{}) error {
+		update, ok := record.(*BatchStore)
+		if !ok {
+			return fmt.Errorf("Record isn't the correct type!  Wanted BatchStore, got %T", record)
+		}
+		update.Flagged = true
+		update.BatchGroup = now
+
+		return nil
+	})
 }
