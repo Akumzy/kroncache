@@ -89,7 +89,7 @@ func main() {
 	if port == "" {
 		port = "5093"
 	}
-	var addr = flag.String("addr", "0.0.0.0:"+port, "http service address")
+	var addr = flag.String("addr", ":"+port, "http service address")
 
 	go runner(store, eb)
 
@@ -264,12 +264,12 @@ func runner(store *badgerhold.Store, eb *EventBus) {
 						}
 						if r.Action == "BATCH" {
 							var records []BatchStore
-							err := updateBatchStore(now, r.ID)
-							fmt.Println(err)
+							updateBatchStore(now, r.ID)
+
 							store.Find(&records, badgerhold.Where("BatchID").Eq(r.ID).And("BatchGroup").Eq(now))
 
 							values := make([]string, len(records))
-							fmt.Println(values)
+
 							for _, r := range records {
 								values = append(values, r.Record)
 							}
