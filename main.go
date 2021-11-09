@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -64,6 +65,8 @@ var (
 		subscribers: Subscribers{},
 	}
 	specParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	// no key error
+	ErrNoKey = errors.New("No key specified")
 )
 
 const (
@@ -145,6 +148,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			AddToBatch(c, p)
 		case "KEYS":
 			FetchKeysHandler(c, p)
+		case "INCREMENT":
+			IncrementHandler(c, p)
+		case "DECREMENT":
+			DecrementHandler(c, p)
 		}
 
 	}
@@ -161,7 +168,6 @@ func saveRecord(p Payload) error {
 	if p.Key == "" {
 		return errors.New("Record key can not be empty.")
 	}
-	fmt.Println(p)
 	record := Store{ID: p.Key, TTL: p.TTL, Record: p.Data, ACK: p.ACK, Cron: p.Cron, Action: p.Action}
 
 	if p.Cron != "" {
@@ -231,6 +237,45 @@ func getKeys() ([]string, error) {
 	return keys, err
 }
 
+// increment value by value
+func increment(key string, value int) (int, error) {
+	var result Store
+	err := store.Get(key, &result)
+	newValue := value
+	if err != nil {
+		return 0, err
+	}
+	oldValue, err := strconv.Atoi(result.Record)
+	if err != nil {
+		return 0, err
+	}
+	newValue = oldValue + value
+
+	result.Record = strconv.Itoa(newValue)
+	err = store.Update(key, result)
+
+	return newValue, err
+}
+
+// decrement value by value
+func decrement(key string, value int) (int, error) {
+	var result Store
+	err := store.Get(key, &result)
+	newValue := value
+	if err != nil {
+		return 0, err
+	}
+	oldValue, err := strconv.Atoi(result.Record)
+	if err != nil {
+		return 0, err
+	}
+	newValue = oldValue - value
+
+	result.Record = strconv.Itoa(newValue)
+	err = store.Update(key, result)
+
+	return newValue, err
+}
 func reset() error {
 	return store.DeleteMatching(&Store{}, nil)
 }
