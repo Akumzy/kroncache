@@ -97,6 +97,7 @@ func main() {
 	go runner(store, eb)
 
 	http.HandleFunc("/", handler)
+	http.HandleFunc("/client", handlerClient)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Fatal(err)
 	}
@@ -152,6 +153,62 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			IncrementHandler(c, p)
 		case "DECREMENT":
 			DecrementHandler(c, p)
+		}
+
+	}
+}
+func handlerClient(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("New Connection client")
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	c, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("upgrade:", err)
+		return
+	}
+	key := makeID()
+	defer func() {
+		c.Close()
+		eb.Unsbscribe(key)
+	}()
+
+	var ch = make(DataChannel)
+	go eb.Subscribe(key, ch)
+	go func(c *websocket.Conn, ch DataChannel) {
+		for {
+			select {
+			case event := <-ch:
+				websocket.WriteJSON(c, event)
+			}
+		}
+
+	}(c, ch)
+
+	for {
+		var p Payload
+		err := websocket.ReadJSON(c, &p)
+		if err != nil {
+			log.Println("write:", err)
+			break
+		}
+		switch p.Action {
+		case "FETCH":
+			var result []Store
+
+			err := store.Find(&result, nil)
+			var results []interface{}
+			if err == nil {
+				var data *Payload
+				results = make([]interface{}, len(result))
+				for _, r := range result {
+					results = append(results, r)
+				}
+				var b []byte
+				b, err = json.Marshal(&results)
+				data = &Payload{Key: p.Key, Action: "FETCH", Data: string(b), ID: p.ID, TTL: p.TTL}
+
+				websocket.WriteJSON(c, &data)
+			}
+
 		}
 
 	}
